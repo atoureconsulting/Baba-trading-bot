@@ -152,4 +152,13 @@ ib_rep = run_inside_bar_backtest("EURUSD", bt_4h, SPEC, spread_price=0.00012)
 check("inside-bar backtest runs", isinstance(ib_rep.stats(), dict))
 print(f"    -> inside-bar: {ib_rep.stats()}")
 
+print("bot battle (synthetic):")
+from baba_bot.battle import print_battle, run_battle
+battle_df = synth(n=9000, trend=0.00003, vol=0.0009, seed=33, freq="15min")
+results = run_battle("EURUSD", battle_df, SPEC.point, spread_price=0.00012)
+check("all 11 contenders produce results", len(results) == 11)
+check("every result has valid metrics", all(r.trades >= 0 and r.max_dd_pips >= 0 for r in results))
+check("always-in episodes counted", any(r.trades > 50 for r in results if r.style == "always-in"))
+print_battle("EURUSD-synth", results)
+
 print("\nALL CHECKS PASSED")

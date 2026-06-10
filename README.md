@@ -93,6 +93,18 @@ Charts → "Max bars in chart" → Unlimited, then reopen the charts and rerun.
 Honest limitations: the news-blackout gate is off in backtest (no historical
 calendar), ambiguous bars count as losses, spread is charged on every trade.
 
+## Bot battle (compare every pool strategy on your data)
+
+```
+py bot_battle.py
+```
+
+Runs 11 strategies from the analyzed open-source bots (FXBot, ForexSmartBot,
+geraked pure entries, the MA-cross and lag-logistic families) head-to-head on
+your broker's history with identical costs and simulation rules, and prints a
+ranked table per symbol. Grid/martingale overlays and data-leaky ML are
+excluded by design — see MASTER_BLUEPRINT.md KB#14.
+
 ## Repo layout
 
 | Path | Purpose |
