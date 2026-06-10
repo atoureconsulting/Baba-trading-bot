@@ -1,6 +1,6 @@
 # Baba Trading Bot — Master Blueprint
 
-**Version:** 1.0
+**Version:** 1.2
 **Scope:** Hybrid trading signal bot for Forex majors (EUR/USD, GBP/USD, USD/JPY, USD/CHF, AUD/USD, USD/CAD, NZD/USD) and Gold (XAU/USD)
 **Goal:** Maximize signal accuracy by fusing technical analysis, market sentiment, macroeconomic filters, and validated open-source bot logic.
 
@@ -14,13 +14,14 @@
 
 | Category | Source | Status |
 |---|---|---|
-| Price/OHLCV multi-TF (15M, 1H, 4H, D) with **bid AND ask** | TBD (broker API / MT5 / OANDA / Dukascopy) | ❌ not chosen |
+| Price/OHLCV multi-TF (15M, 1H, 4H, D) with **bid AND ask** | **OANDA v20 API via `tpqoa`** (candidate promoted by KB#2 — free practice account, historical mid/bid/ask candles, tick streaming, order API, has XAU/USD) | ⏳ awaiting confirmation |
 | Tick volume | Same feed (caveat: forex tick volume ≠ real volume; confirmation-only) | ⏳ |
 | Macro calendar (NFP, FOMC, CPI, ECB/BOJ) | ForexFactory / DailyFX calendar (scrape or JSON) | ⏳ candidate chosen |
 | Retail positioning | IG Client Sentiment or OANDA Order Book | ⏳ candidate chosen |
 | COT report (weekly) | CFTC (free, published Fridays, data as of Tuesday) | ⏳ |
 | Gold macro drivers | DXY price feed, 10Y TIPS real yield (FRED), CME FedWatch | ⏳ |
 | Risk sentiment proxy | S&P 500 futures (ES) | ⏳ |
+| Backup/secondary tick feed | Polygon.io websocket (pattern from KB#9; useful for feed cross-validation) | optional |
 
 **Microstructure rules (from KB#1):**
 - Use **mid price** = (bid+ask)/2 for all indicator computation — never raw close of one side.
@@ -42,6 +43,8 @@ backtest**, never hand-tuned to in-sample data.
 | Bollinger Bands | 15M | 20,2 | Range-regime entry trigger; squeeze = pending breakout | 0.20 | Only active when regime = RANGING |
 | Tick volume | 15M | n/a | Breakout confirmation only | 0.10 | `breakout_strength = candle_range / avg_range(20)`; low-range breakout = suspected fakeout |
 | Divergence detector | 15M/1H | 5-bar swing compare | High-accuracy reversal overlay | bonus +0.15 | `min(price[-5:])` vs `min(RSI[-5:])` (and max for bearish) |
+| **Market Profile POC/VAH/VAL** (KB#6) | session/daily | TPO, 70% value area | **Level engine** — defines "near support/resistance" for limit entries, range fades, retail-sentiment veto | levels, not a vote | Port from EarnForex MarketProfile (Apache-2.0). POC = max-TPO price (center-biased tiebreak); VA = expand from POC until 70% TPOs enclosed |
+| **Inside-bar breakout** (KB#4) | 4H | entry = ±10% of mother-bar range beyond extreme; SL 0.4×range; TP 0.8×range | Breakout-regime entry trigger | 0.20 (HIGH_VOL regime) | Evidence: +583 pips USD/JPY 2020, 746 trades, spread-adjusted — but only ~0.8 pips/trade avg → thin; needs our filter stack on top |
 
 **Excluded** (per KB#1, unless future evidence reverses): Stochastic standalone,
 Ichimoku, pivot points, Fibonacci retracements (subjective; only ever as confluence,
@@ -111,6 +114,11 @@ distinguishes *event-driven* vol (unpredictable → blackout) from *structural* 
   narrowing* (COT index > 80) = bullish; large-spec net-long crowding
   (index > 90) = exhaustion warning.
 
+Two COT philosophies now in the pool — **both kept as separate candidate features,
+backtest decides**: (a) our contrarian COT-Index percentile extremes (above), and
+(b) KB#7's COT1 momentum approach: rank symbols by week-over-week *positioning
+growth*, trade the top movers, entries Mon–Tue only (right after Friday release).
+
 ### Retail positioning (contrarian)
 ```python
 if retail_long_pct > 75 and price_near_resistance: veto_longs(); tilt_short()
@@ -128,7 +136,8 @@ Hierarchy: **regime → time/news → HTF bias → LTF trigger → sentiment vet
   - TRENDING + short bias: 9 EMA crosses below 21 EMA AND RSI(14) < 60
   - RANGING + long bias: price < lower BB AND RSI(14) < 30
   - RANGING + short bias: price > upper BB AND RSI(14) > 70
-  - HIGH_VOL: breakout of session high/low with `breakout_strength ≥ 1.5` and rising tick volume
+  - HIGH_VOL: breakout of session high/low with `breakout_strength ≥ 1.5` and rising tick volume; **or 4H inside-bar breakout** (KB#4: entry ±10% of mother-bar range, SL 0.4×range, TP 0.8×range)
+  - ⚠️ Evidence caveat (KB#4, KB#8): naked MA-crossover entries tested net-negative across 630 parameter combos / 21 pairs on H1; OHLCV-only ML direction prediction ≈ no edge after costs. The 9/21 EMA trigger survives **only** because it is regime- and bias-gated; if walk-forward shows it lagging the inside-bar/structure triggers, replace it.
 - **Divergence overlay:** confirmed divergence adds +0.15 confidence; opposing divergence vetoes.
 - **Take profit:** trending → 2.0 R; ranging → mid-band (≈1.2–1.5 R typical); HIGH_VOL breakout → trail at 1×ATR after 1 R.
 - **Time stop:** breakout trades exit if not in profit within N bars (N = backtest-derived, prior 8×15M).
@@ -148,10 +157,20 @@ if daily_loss > 0.03 * equity:           halt_until_next_session()
 if drawdown_from_peak > 0.15:            close_all(); disable_trading(24h); alert()
 ```
 
-- Structure stops (beyond swing high/low) preferred in TRENDING; ATR stops in RANGING/HIGH_VOL.
+- Structure stops (beyond swing high/low) preferred in TRENDING; ATR stops in RANGING/HIGH_VOL. KB#7 pattern adopted: swing stop = swing extreme ± fixed buffer (e.g. 6 pips) to survive stop-hunts.
 - Max 1 position per currency bloc (USD-cluster counts as one).
 - No martingale, no grid averaging.
 - Kelly inputs (win rate, payoff) only from walk-forward stats with ≥500 trades; until then fixed 1%.
+
+**Sizing edge cases adopted from KB#5 (EarnForex PositionSizer, Apache-2.0 — portable):**
+- Include **round-trip commission** in the risk denominator: `lots = risk_money / (sl_points × unit_cost/tick_size + 2×commission_per_lot)`.
+- Always **round lot size DOWN** to broker lot step; clamp to min/max lot; split orders above max lot.
+- Convert risk across currencies via USD as intermediate when no direct pair exists.
+- Use **asymmetric tick values** (loss vs profit) — matters for XAU/USD.
+- Guard `tick_size == 0` division; treat positions without SL as infinite risk in portfolio totals.
+- Pre-trade checks: max spread, max entry-to-SL distance, post-trade margin utilization cap.
+- Portfolio-level total risk = Σ per-position (SL distance × unit cost), currency-converted.
+- Breakeven move (entry + round-trip cost, not raw entry) and trailing stop as managed exits.
 
 ## 8. Execution
 
@@ -225,12 +244,128 @@ above 60% in backtest as an overfitting red flag, not a success.
 
 ## 12. Missing Piece (highest-value next input)
 
-**Broker/platform + historical data source decision.** Every section above is
-now specified enough to implement, but nothing can be validated until we lock:
-(1) execution venue (MT5? OANDA? cTrader?) — determines API, spreads, whether
-bid/ask history and tick volume are available; (2) backtest data source
-(Dukascopy ticks are free and bid/ask-true). Second priority: confirm retail
-sentiment source (IG vs OANDA) since the veto layer depends on it.
+**Lock the platform decision: OANDA (Python) vs MT5.** Seven of nine KB sources
+now cluster around two stacks — OANDA REST/stream in Python (KB#2, #4, #8, #9)
+vs MetaTrader 5 (KB#3 bridge, #5, #6, #7). Everything in this blueprint is
+implementable on either, but the choice determines what we port vs use natively, and
+nothing can be backtested against real spreads until it's made. Recommendation:
+**OANDA practice account + Python** (free API, bid/ask history, practice
+sandbox, all reference patterns already analyzed). Second priority: confirm
+retail sentiment source (IG vs OANDA order book) for the veto layer.
+
+---
+
+## 13. External Component Pool (vetted open-source logic)
+
+### KB#2 — FXBot (github.com/trentstauff/FXBot) — Python, OANDA v20 + tpqoa
+
+**What it is:** interactive CLI bot offering vectorized backtesting + tick-stream live
+trading on OANDA practice/live accounts. Five strategies: SMA crossover,
+Bollinger mean reversion, momentum (sign of rolling mean return), contrarian
+(inverse momentum), logistic-regression classification on lagged returns
+(+ a linear-regression forward-test module, backtest only).
+
+**ADOPT (architecture, not verbatim — repo has NO license file):**
+- ✅ OANDA + `tpqoa` integration pattern (historical mid/bid/ask candles, tick stream, orders) → promotes OANDA to lead broker candidate (§1).
+- ✅ Live bar-builder: stream ticks → resample mid price to bar → act only on **completed** bars. Matches our §8 mid-price + confirmation-candle rules.
+- ✅ Vectorized backtest skeleton: `position.shift(1) × log returns` (no lookahead), per-trade cost via `|Δposition| × tc`, benchmark vs buy-and-hold.
+- ✅ Class template: `Backtester` / `LiveTrader` bases with `define_strategy()` override per strategy → clean fit for our regime-switched ensemble.
+- ✅ Momentum & contrarian rolling-window probes as cheap auxiliary regime confirmers (momentum profits ↔ trending; contrarian profits ↔ ranging).
+
+**REJECT (conflicts with blueprint):**
+- ❌ Always-in-market ±1 positions (never flat) → violates our flat-by-default confluence gating (§6).
+- ❌ No per-trade SL/TP, no position sizing (fixed units); "stop loss" is only a session-P&L halt → violates §7 (mandatory stops).
+- ❌ Market orders for all entries (reversals at 2× units) → violates §8 limit-order rule.
+- ❌ Optimizer = brute-force grid search maximizing return **on the same interval** (no walk-forward, no out-of-sample) → textbook overfitting; exactly what §9 forbids.
+- ❌ ML layer uses only lagged returns as features (≈ coin-flip edge documented across literature); hit-ratio bookkeeping also miscounts zero-return bars.
+- ⚠️ Code is stale: pandas `.append()` (removed in pandas 2.0), buggy market-hours check, double "−100" in some optimizer printouts. Treat as reference, not dependency.
+
+### KB#3 — ForexSmartBot (github.com/VoxHash/ForexSmartBot) — Python, MIT(+terms)
+
+**What it is:** large PyQt6 desktop bot, 17 strategies (10 technical + 7 ML), multi-provider data (YFinance/OANDA/AlphaVantage/CSV/MT4-ZeroMQ bridge), paper/MT4/REST/IB brokers, GA/Optuna/Monte-Carlo optimization modules. Elaborate docs that **overstate the code**.
+
+**ADOPT:**
+- ✅ Risk engine design (`core/risk_engine.py`): layered sizing = base risk% × symbol multiplier × strategy multiplier, then `min(…, 0.25-Kelly, volatility-target size)`, **drawdown throttle with hysteresis** (halve size at 25% DD, resume only after 10% recovery). The hysteresis idea improves our circuit breaker (§7).
+- ✅ Fear Index composite regime score (z-scored VIX 0.30 + FX vol 0.25 + DXY 0.15 + news 0.20 + policy 0.10, SMA-smoothed, ±0.5 thresholds) → clean template for our macro/sentiment layer.
+- ✅ Multi-provider fallback chain pattern for data resilience.
+- ✅ Donchian-breakout + ATR strategy structure; SMA/RSI implementations are sound.
+
+**REJECT:**
+- ❌ **All 7 ML strategies have look-ahead data leakage** (`target = Close.shift(-1)` — trained on the future). Every ML backtest result from this repo is invalid.
+- ❌ **Walk-forward is fake**: training windows are computed then ignored; no reoptimization — sequential in-sample tests labeled "walk-forward". Violates §9.
+- ❌ Docs claim v3.3 cloud/REST/WebSocket features that don't exist in code; no slippage/commission in backtests; no cross-symbol correlation in sizing.
+- **Meta-lesson:** impressive READMEs ≠ valid logic. Every external claim gets code-level verification before entering this blueprint.
+
+### KB#4 — Python-ForexTradingBot (github.com/mathewqpmiller) — Python, NO LICENSE
+
+**What it is:** OANDA research notebooks + incomplete starter bot. Honest, data-driven exploration.
+
+**ADOPT (patterns/evidence, not code — no license):**
+- ✅ **Inside-bar 4H breakout** (now in §2/§6): entry ±10% mother-bar range, SL 0.4×, TP 0.8× (1:2 RR). Spread-adjusted sim: +583 pips, 746 trades, USD/JPY 2020. Caveat: ~0.8 pips/trade — too thin raw; viable only with our session/regime/news filters and only if walk-forward confirms on more pairs/years.
+- ✅ **Negative result worth gold:** 630 MA-crossover combos × 21 pairs on H1 → ALL net-negative. Hard evidence behind §6's caveat.
+- ✅ Bid/ask dual-stream simulation (buy at ask-derived levels, sell at bid) and pip-location normalization (`10^pipLocation`) — JPY pairs & gold handled correctly.
+- ⚠️ Their own spread experiment: spread cost ≈ 3% of gross pips on H4 USD/JPY — on 15M signals it will be several times larger; our §9 cost model is mandatory, not optional.
+
+### KB#5 — EarnForex PositionSizer — MQL5, Apache-2.0
+
+**What it is:** mature, widely-used MT5 position-sizing panel/EA. The sizing math is now adopted wholesale into §7 (see "Sizing edge cases"). Also adopted: multiple-TP volume splitting with remainder distribution, pending-order expiry, OCO-style entry handling, magic-number scoping. License permits porting to Python with attribution.
+
+### KB#6 — EarnForex MarketProfile — MQL5/C#, Apache-2.0
+
+**What it is:** Market Profile (TPO) indicator: POC / VAH / VAL / single prints / developing POC, with session segmentation (intraday/daily/weekly/monthly) and level-cross alerts.
+
+**ADOPT:**
+- ✅ Port POC/VAH/VAL into Python as the **level engine** (§2): per session, count TPOs per price tick; POC = max count (tie → closest to session midpoint); expand symmetrically from POC, adding the larger neighbor side, until 70% of TPOs enclosed → VAH/VAL.
+- ✅ Prior-session level rays = our limit-order placement anchors and "price near S/R" predicate (needed by retail-sentiment veto §5 and range fades §6).
+- ✅ Their three cross definitions (price break / candle close / gap cross) formalize our "confirmation candle" rule — we adopt **candle-close-through** as the standard confirmation.
+- ✅ Single prints = low-acceptance zones → expect fast revisits; useful for TP placement on breakouts.
+
+### KB#7 — geraked/metatrader5 — MQL5, MIT
+
+**What it is:** 10+ MQL5 EAs (BBRSI, 3MACD, 2MACDSTO, CEZLSMA, DHLAOS, LRCMACD, COT1…) on a shared `EAUtils.mqh` framework, with published MT5 tester reports.
+
+**ADOPT:**
+- ✅ `EAUtils` framework features: risk% sizing off min(balance, free margin), swing-stop ± buffer, margin-level floor (refuse trades below 300%), spread limit, calendar-based news pause, order retry with backoff — all consistent with §§4,7,8.
+- ✅ **COT1 architecture** (§5): weekly CFTC data in SQLite, rank 8 currency contracts by positioning growth, trade top long/short movers, Mon–Tue entries only, max 1 deal/symbol/week. MIT — portable.
+
+**REJECT:**
+- ❌ **The published profitability is a grid/martingale artifact.** Their own READMEs admit every pure strategy was unprofitable; profits appear only after grid averaging (vol multipliers 1.0–1.5×, up to 50 levels) at 1:100–1:500 leverage. That's tail-risk laundering: smooth equity curve until one trend wipes the account. Violates our hard no-grid rule (§7). None of the entry strategies earn an indicator-suite slot on this evidence.
+
+### KB#8 — raidastauras/Trading-Bot — Python, NO LICENSE (2018, TF1.x)
+
+**What it is:** honest ML research: logistic regression / LSTM / CNN on 15y EUR/USD H1, 25–250 ta-lib features, three-class direction labels (up/flat/down with dead-zone delta), plus a live OANDA loop.
+
+**ADOPT (evidence + patterns):**
+- ✅ **Author's own conclusions** (validating our §2/§11 stance): OHLCV-only direction prediction "not really accurate"; 250 features no better than 25; direct return-maximization objective fails/overfits; transaction costs flip marginal models negative. → Our rule stands: ML enters only as a meta-layer over **our** filter-stack features (regime, sentiment, macro), never on raw price alone.
+- ✅ Three-class labeling with flat dead-zone (≈ ±2.75 pips H1) — better than binary labels for "no-trade" learning; adopt if/when we train a meta-model.
+- ✅ Session dummy features (London/NY/Sydney/Tokyo) and multi-period ta-lib feature template.
+
+**REJECT:** ❌ market orders, all-margin sizing, no SL/TP in live loop; deprecated OANDA v1 + TF1.x code.
+
+### KB#9 — Trading_Pal-main (United-Visions) — Python/Flask, **AGPL-3.0**
+
+**What it is:** Gemini-LLM chat web app wrapping OANDA/Alpaca order endpoints + Polygon.io websocket feed. **No strategy or signal logic at all** — order CRUD via chatbot.
+
+- ⚠️ **License clash: AGPL-3.0 is copyleft.** Copying any of its code into this bot would force open-sourcing the whole system if ever deployed as a service. **Do not vendor code from this repo.** Ideas only.
+- ✅ Idea worth keeping: Polygon.io websocket + REST-backfill + reconnect-with-backoff as an independent secondary feed (§1) for data sanity checks.
+- ❌ Anti-patterns catalogued: committed SQLite DB with user data, plaintext broker keys in DB, no input validation on order routes, committed logs. Our repo: secrets via env/config outside git, period.
+- ❌ "LLM decides trades from chat" is the opposite of our deterministic, backtestable pipeline.
+
+---
+
+## 14. Clash Matrix (cross-source conflicts & resolutions)
+
+| # | Clash | Sources | Resolution |
+|---|---|---|---|
+| 1 | **Grid/martingale "profitability"** vs hard no-grid rule | KB#7 (all EAs profitable only with grid) vs KB#1/§7, KB#5 (fixed-risk philosophy) | Grid rejected. Tail risk hidden by averaging-down; KB#7 entry strategies admitted unprofitable without it. §7 unchanged. |
+| 2 | **Always-in-market ±1** vs flat-by-default | KB#2 (FXBot), KB#8 (live loop) vs §6 confluence gating | Rejected. Always-in doubles cost exposure and forces trades in EVENT/TRANSITIONAL regimes. |
+| 3 | **Market orders** vs limit-order rule | KB#2, KB#8, KB#9 vs KB#1/§8 | Limit orders stand; Market Profile levels (KB#6) now give us the concrete prices to rest limits at. |
+| 4 | **MA-crossover entries** | KB#2/KB#3 ship them; KB#4 proves 630 combos net-negative; §6 uses 9/21 EMA | Kept *only* as regime-gated trigger, on notice: §6 caveat says replace with structure/inside-bar triggers if walk-forward agrees with KB#4. |
+| 5 | **ML claims** | KB#3 (7 leaky models, fake walk-forward) vs KB#8 (honest negative results) vs KB#2 (lag-features ≈ coin flip) | Converging evidence: OHLCV-only ML has no deployable edge. ML restricted to future meta-layer over engineered filter features. KB#3's numbers quarantined entirely. |
+| 6 | **COT philosophy: contrarian extremes vs positioning momentum** | §5 COT-Index percentile vs KB#7 COT1 growth-ranking | Genuine methodological conflict — both retained as separate candidate features; walk-forward backtest arbitrates. They must not both gate the same trade (double-counting one dataset). |
+| 7 | **Licenses** | KB#9 AGPL (viral) vs KB#2/#4/#8 no-license (all rights reserved) vs KB#5/#6 Apache, KB#7 MIT, KB#3 MIT+terms | Port code only from Apache/MIT sources (KB#5, #6, #7, cautiously #3). No-license & AGPL repos: patterns and evidence only, zero copied code. |
+| 8 | **Platform split: MQL5 vs Python** | KB#5/#6/#7 are MT5-side; our stack is Python (OANDA candidate) | Not adopted as dependencies — algorithms get **ported** to Python. If user later prefers MT5 execution, EarnForex tools run natively alongside. |
+| 9 | **Validation quality** | KB#3 fake walk-forward & KB#7 in-sample grid reports vs §9 standards | §9 unchanged and now battle-tested: every external performance claim so far has failed our checklist — none enter the accuracy estimate. |
 
 ---
 
@@ -240,3 +375,11 @@ sentiment source (IG vs OANDA) since the veto layer depends on it.
 |---|---|---|---|---|
 | 0 | 2026-06-10 | Framework definition | Blueprint skeleton v0.1 | — |
 | 1 | 2026-06-10 | Deep market-structure & strategy reference (Parts 1–7: microstructure, regime taxonomy, ranked indicators, macro/sentiment filters, Kelly sizing, execution, validation) | Blueprint v1.0 — populated §§1–10 | (a) v0 "suppress all vol" vs KB#1 "trade structural vol breakouts" → resolved: EVENT suppresses, HIGH_VOL trades; (b) KB#1 gold COT "commercials net long >150k = buy" is structurally impossible (gold commercials are net short hedgers) → replaced with COT Index percentile logic; (c) fixed 2R TP vs mean-reversion logic → TP made regime-specific |
+| 2 | 2026-06-10 | FXBot repo (trentstauff) | §13 KB#2; OANDA/tpqoa promoted in §1 | Always-in-market, market orders, in-sample optimizer → all rejected (clash matrix #2,#3,#9) |
+| 3 | 2026-06-10 | ForexSmartBot repo (VoxHash) | §13 KB#3; DD-throttle hysteresis + Fear Index template adopted (§7,§5) | ML data leakage + fake walk-forward → quarantined (clash #5,#9) |
+| 4 | 2026-06-10 | Python-ForexTradingBot repo (mathewqpmiller) | §13 KB#4; inside-bar trigger added (§2,§6); MA-cross negative evidence (§6 caveat) | Challenges our own EMA-cross trigger (clash #4) |
+| 5 | 2026-06-10 | EarnForex PositionSizer | §13 KB#5; sizing edge cases merged into §7 | None — pure upgrade |
+| 6 | 2026-06-10 | EarnForex MarketProfile | §13 KB#6; POC/VAH/VAL level engine added (§2); close-through confirmation standard (§8 refinement) | None — fills the "where to rest limit orders" gap |
+| 7 | 2026-06-10 | geraked/metatrader5 EA collection | §13 KB#7; EAUtils risk patterns + COT1 momentum approach (§5,§7) | Grid-dependent profits rejected (clash #1); COT philosophy conflict logged (clash #6) |
+| 8 | 2026-06-10 | raidastauras/Trading-Bot ML research | §13 KB#8; 3-class labeling + session dummies + negative-evidence (§2,§6,§11) | Reinforces ML-as-meta-layer-only rule (clash #5) |
+| 9 | 2026-06-10 | Trading_Pal-main (United-Visions) | §13 KB#9; Polygon backup-feed idea (§1) | AGPL license wall — ideas only, no code (clash #7) |
