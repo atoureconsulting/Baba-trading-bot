@@ -127,6 +127,8 @@ cal.auto_events = [{"time": "2026-06-12 12:30", "name": "US CPI", "impact": "CPI
 inside = _dt(2026, 6, 12, 12, 15, tzinfo=_tz.utc)
 outside = _dt(2026, 6, 12, 14, 0, tzinfo=_tz.utc)
 check("auto event blocks XAUUSD inside window", cal.in_blackout("XAUUSD", inside) is not None)
+check("GOLD symbol name also gated (Admirals etc.)", cal.in_blackout("GOLD", inside) is not None)
+check("GOLDm suffix also gated", cal.in_blackout("GOLDm", inside) is not None)
 check("auto event blocks EURUSD (USD leg)", cal.in_blackout("EURUSD", inside) is not None)
 check("clear outside window", cal.in_blackout("XAUUSD", outside) is None)
 check("GBPJPY unaffected by USD event", cal.in_blackout("GBPJPY", inside) is None)

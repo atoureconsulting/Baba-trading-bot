@@ -31,6 +31,12 @@ BLACKOUTS = {
 REFRESH_HOURS = 4
 
 
+def _is_gold(symbol: str) -> bool:
+    """Brokers name gold XAUUSD, XAUUSD.a, GOLD, GOLDm, Gold... — catch them all."""
+    s = symbol.upper()
+    return s.startswith("XAU") or "GOLD" in s
+
+
 class NewsCalendar:
     """Blackout calendar = manual events (news_events.json) + live
     ForexFactory events (auto-fetched, cached in news_events_auto.json)."""
@@ -72,7 +78,7 @@ class NewsCalendar:
         """Return the blocking event name if `symbol` is inside a window."""
         now_utc = now_utc or datetime.now(timezone.utc)
         sym_ccys = {symbol[:3].upper(), symbol[3:6].upper()}
-        if symbol.upper().startswith("XAU"):
+        if _is_gold(symbol):
             sym_ccys.add("USD")  # gold reacts to all USD events
         for ev in self.events + self.auto_events:
             if not sym_ccys & {c.upper() for c in ev.get("currencies", [])}:
