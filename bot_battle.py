@@ -26,15 +26,22 @@ def main():
     try:
         for symbol in args.symbols:
             spec = client.spec(symbol)
-            spread_pts = args.spread_points or client.spread_points(symbol)
             n = int(args.years * 365 * BARS_PER_DAY[args.timeframe])
-            print(f"\n############ {symbol} {args.timeframe} | {args.years}y | "
-                  f"spread {spread_pts} pts ############")
             try:
                 df = client.candles(symbol, args.timeframe, n)
             except RuntimeError as exc:
-                print(f"  data unavailable: {exc}")
+                print(f"\n############ {symbol}: data unavailable: {exc}")
                 continue
+            # median historical spread from the bars themselves — immune to
+            # off-hours/rollover snapshots that poison live readings
+            if args.spread_points is not None:
+                spread_pts, src = args.spread_points, "manual"
+            elif "spread" in df.columns and df["spread"].median() > 0:
+                spread_pts, src = int(df["spread"].median()), "median historical"
+            else:
+                spread_pts, src = client.spread_points(symbol), "live snapshot"
+            print(f"\n############ {symbol} {args.timeframe} | {args.years}y | "
+                  f"spread {spread_pts} pts ({src}) ############")
             print(f"  got {len(df)} bars (~{(df.index[-1]-df.index[0]).days/365:.1f} years)")
             print_battle(symbol, run_battle(symbol, df, spec.point, spread_pts * spec.point))
         print("\nFor comparison, Baba bot (KB#13 walk-forward, M15 OOS): "

@@ -50,21 +50,26 @@ class BattleResult:
     total_pips: float
     max_dd_pips: float
     note: str = ""
+    pnl_by_year: dict | None = None
 
 
-def _metrics(name: str, source: str, style: str, pnl_pips: list[float],
-             note: str = "") -> BattleResult:
-    if not pnl_pips:
+def _metrics(name: str, source: str, style: str,
+             pnl: list[tuple[pd.Timestamp, float]], note: str = "") -> BattleResult:
+    if not pnl:
         return BattleResult(name, source, style, 0, 0.0, 0.0, 0.0, 0.0, 0.0, note or "no trades")
-    arr = np.array(pnl_pips)
+    arr = np.array([p for _, p in pnl])
     wins, losses = arr[arr > 0], arr[arr <= 0]
     cum = np.cumsum(arr)
     dd = float((np.maximum.accumulate(cum) - cum).max())
     pf = float(wins.sum() / -losses.sum()) if losses.sum() < 0 else float("inf")
+    by_year: dict[int, float] = {}
+    for ts, p in pnl:
+        by_year[ts.year] = by_year.get(ts.year, 0.0) + p
     return BattleResult(name, source, style, len(arr),
                         round(float((arr > 0).mean()), 3),
                         round(float(arr.mean()), 2), round(pf, 2),
-                        round(float(arr.sum()), 1), round(dd, 1), note)
+                        round(float(arr.sum()), 1), round(dd, 1), note,
+                        {y: round(v, 0) for y, v in sorted(by_year.items())})
 
 
 # --------------------------------------------------------------------------
@@ -72,14 +77,14 @@ def _metrics(name: str, source: str, style: str, pnl_pips: list[float],
 # --------------------------------------------------------------------------
 
 def _run_always_in(df: pd.DataFrame, pos: pd.Series, spread_price: float,
-                   pip_size: float) -> list[float]:
+                   pip_size: float) -> list[tuple[pd.Timestamp, float]]:
     pos = pos.fillna(0.0)
     held = pos.shift(1).fillna(0.0)                    # act on next bar (no lookahead)
     bar_pnl = df["close"].diff().fillna(0.0) * held
     cost = pos.diff().abs().fillna(0.0) * (spread_price / 2.0)
     net = (bar_pnl - cost) / pip_size
     episode_id = (held != held.shift(1)).cumsum()
-    pnl = [float(g.sum()) for eid, g in net.groupby(episode_id)
+    pnl = [(g.index[0], float(g.sum())) for eid, g in net.groupby(episode_id)
            if held[g.index[0]] != 0]
     return pnl
 
@@ -89,7 +94,7 @@ def _run_always_in(df: pd.DataFrame, pos: pd.Series, spread_price: float,
 # --------------------------------------------------------------------------
 
 def _run_events(df: pd.DataFrame, entries: list[tuple[int, int, float, float]],
-                spread_price: float, pip_size: float) -> list[float]:
+                spread_price: float, pip_size: float) -> list[tuple[pd.Timestamp, float]]:
     """entries: list of (bar_index, direction, sl, tp); sequential, one at a time."""
     pnl, busy_until = [], -1
     for i, direction, sl, tp in entries:
@@ -99,7 +104,7 @@ def _run_events(df: pd.DataFrame, entries: list[tuple[int, int, float, float]],
         if (direction > 0 and sl >= entry) or (direction < 0 and sl <= entry):
             continue
         _, exit_i, exit_px = _simulate(df, i + 1, direction, entry, sl, tp)
-        pnl.append(((exit_px - entry) * direction - spread_price) / pip_size)
+        pnl.append((df.index[i], ((exit_px - entry) * direction - spread_price) / pip_size))
         busy_until = exit_i
     return pnl
 
@@ -284,9 +289,16 @@ def print_battle(symbol: str, results: list[BattleResult]) -> None:
               f"{'exp(pips)':>9} {'PF':>6} {'total':>9} {'maxDD':>8}  note")
     print(header)
     print("-" * len(header))
-    for r in sorted(results, key=lambda r: r.expectancy_pips, reverse=True):
+    ranked = sorted(results, key=lambda r: r.expectancy_pips, reverse=True)
+    for r in ranked:
         print(f"{r.name:26} {r.source:28} {r.trades:>6} {r.win_rate:>6.1%} "
               f"{r.expectancy_pips:>9.2f} {r.profit_factor:>6.2f} "
               f"{r.total_pips:>9.1f} {r.max_dd_pips:>8.1f}  {r.note}")
+    print("\nyear-by-year (positive strategies with >100 trades — consistency check):")
+    for r in ranked:
+        if r.expectancy_pips > 0 and r.trades > 100 and r.pnl_by_year:
+            years = "  ".join(f"{y}:{v:+.0f}" for y, v in r.pnl_by_year.items())
+            pos_years = sum(1 for v in r.pnl_by_year.values() if v > 0)
+            print(f"  {r.name} [{pos_years}/{len(r.pnl_by_year)} years positive]: {years}")
     print("excluded: Trading_Pal (no strategy), EarnForex tools (not bots), "
           "ForexSmartBot ML (data leakage), geraked grid overlay (martingale).")
