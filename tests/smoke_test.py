@@ -133,4 +133,23 @@ check("auto event blocks EURUSD (USD leg)", cal.in_blackout("EURUSD", inside) is
 check("clear outside window", cal.in_blackout("XAUUSD", outside) is None)
 check("GBPJPY unaffected by USD event", cal.in_blackout("GBPJPY", inside) is None)
 
+print("backtester (synthetic, ~6 months M15):")
+from baba_bot.backtest import run_backtest, run_inside_bar_backtest, walk_forward_threshold
+bt_trig = synth(n=17000, trend=0.00004, vol=0.0009, seed=21, freq="15min")
+bt_4h = bt_trig.resample("4h").agg(
+    {"open": "first", "high": "max", "low": "min", "close": "last", "tick_volume": "sum"}
+).dropna()
+rep = run_backtest("EURUSD", "M15", bt_trig, bt_4h, SPEC, spread_price=0.00012, progress=False)
+st = rep.stats()
+check("backtest completes and produces stats", "trades" in st)
+print(f"    -> {st}")
+if rep.trades:
+    check("net R accounts for spread (no exact +2R wins)",
+          all(abs(t.r - 2.0) > 1e-9 for t in rep.trades if t.outcome == "take_profit"))
+    check("walk-forward returns verdict or honest error",
+          isinstance(walk_forward_threshold(rep), dict))
+ib_rep = run_inside_bar_backtest("EURUSD", bt_4h, SPEC, spread_price=0.00012)
+check("inside-bar backtest runs", isinstance(ib_rep.stats(), dict))
+print(f"    -> inside-bar: {ib_rep.stats()}")
+
 print("\nALL CHECKS PASSED")

@@ -144,9 +144,11 @@ def evaluate(
     profile: ProfileLevels | None = None,
     now_utc: datetime | None = None,
     spread_points: int | None = None,
+    confidence_threshold: float | None = None,
 ) -> tuple[SignalAdvice | None, str]:
     """Run the full §10 tree. Returns (advice_or_none, status_line)."""
     now_utc = now_utc or datetime.now(timezone.utc)
+    threshold = CONFIDENCE_THRESHOLD if confidence_threshold is None else confidence_threshold
 
     # 1. event / regime / session gates
     if news_blackout_reason:
@@ -174,8 +176,8 @@ def evaluate(
     score = _confluence(df_trigger, direction, reasons)
     if score < 0:
         return None, f"{symbol} {timeframe}: VETO — opposing divergence"
-    if score < CONFIDENCE_THRESHOLD:
-        return None, f"{symbol} {timeframe}: confluence {score:.2f} below threshold {CONFIDENCE_THRESHOLD}"
+    if score < threshold:
+        return None, f"{symbol} {timeframe}: confluence {score:.2f} below threshold {threshold}"
 
     entry = float(df_trigger["close"].iloc[-1])
     if profile is not None:

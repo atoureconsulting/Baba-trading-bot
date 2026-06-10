@@ -17,8 +17,9 @@ import argparse
 
 def parse_args():
     p = argparse.ArgumentParser(description="MT5 signal advisor")
-    p.add_argument("--symbols", nargs="+", default=["XAUUSD", "EURUSD"],
-                   help="MT5 symbol names as shown in your Market Watch")
+    p.add_argument("--symbols", nargs="+", default=["GOLD", "GBPUSD", "USDJPY", "EURUSD"],
+                   help="MT5 symbol names as shown in your Market Watch "
+                        "(gold is GOLD on Admirals, XAUUSD on many others)")
     p.add_argument("--timeframes", nargs="+", default=["M15", "H1"],
                    choices=["M1", "M5", "M15", "M30", "H1", "H4", "D1"])
     p.add_argument("--risk", type=float, default=0.01,

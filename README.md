@@ -75,6 +75,24 @@ Symbols must match your broker's Market Watch names exactly (some brokers use
   advised trade hits its stop or target — this journal is the dataset that
   turns the accuracy estimate into a measured number (blueprint §12b).
 
+## Backtesting (measure accuracy before trusting it)
+
+```
+py backtest.py --symbols GOLD GBPUSD USDJPY EURUSD --timeframe M15 --years 3
+```
+
+Replays the *same* signal engine the advisor runs over your broker's MT5
+history (MT5 must be open; first run per symbol may take several minutes —
+progress is printed). For each symbol you get in-sample stats, a per-regime
+breakdown, **walk-forward out-of-sample results** (the number that counts),
+a recommended confidence threshold, and a trades CSV.
+
+If it reports far less history than requested: MT5 → Tools → Options →
+Charts → "Max bars in chart" → Unlimited, then reopen the charts and rerun.
+
+Honest limitations: the news-blackout gate is off in backtest (no historical
+calendar), ambiguous bars count as losses, spread is charged on every trade.
+
 ## Repo layout
 
 | Path | Purpose |
