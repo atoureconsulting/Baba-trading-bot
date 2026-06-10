@@ -109,4 +109,26 @@ if sig:
     print()
     print(sig.describe())
 
+print("news feed parsing (offline):")
+from baba_bot.newsfeed import _RISK_WORDS, classify_impact
+check("NFP title classified", classify_impact("Non-Farm Employment Change", "High") == "NFP")
+check("FOMC title classified", classify_impact("FOMC Statement & Federal Funds Rate", "High") == "FOMC")
+check("CPI title classified", classify_impact("CPI y/y", "High") == "CPI")
+check("generic high-impact gates", classify_impact("Retail Sales m/m", "High") == "DEFAULT")
+check("low impact ignored", classify_impact("Tertiary Industry Activity", "Low") is None)
+check("risk keywords flag", bool(_RISK_WORDS.search("Surprise hike: BoJ emergency intervention")))
+check("calm headline not flagged", not _RISK_WORDS.search("EUR/USD steadies ahead of session open"))
+
+print("calendar merge (manual + auto):")
+from datetime import datetime as _dt, timezone as _tz
+from baba_bot.news import NewsCalendar
+cal = NewsCalendar(path="/tmp/_none.json", auto_path="/tmp/_none_auto.json")
+cal.auto_events = [{"time": "2026-06-12 12:30", "name": "US CPI", "impact": "CPI", "currencies": ["USD"]}]
+inside = _dt(2026, 6, 12, 12, 15, tzinfo=_tz.utc)
+outside = _dt(2026, 6, 12, 14, 0, tzinfo=_tz.utc)
+check("auto event blocks XAUUSD inside window", cal.in_blackout("XAUUSD", inside) is not None)
+check("auto event blocks EURUSD (USD leg)", cal.in_blackout("EURUSD", inside) is not None)
+check("clear outside window", cal.in_blackout("XAUUSD", outside) is None)
+check("GBPJPY unaffected by USD event", cal.in_blackout("GBPJPY", inside) is None)
+
 print("\nALL CHECKS PASSED")

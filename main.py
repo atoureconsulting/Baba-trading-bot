@@ -23,11 +23,36 @@ def parse_args():
                    choices=["M1", "M5", "M15", "M30", "H1", "H4", "D1"])
     p.add_argument("--risk", type=float, default=0.01,
                    help="risk per signal as a fraction of balance (default 0.01)")
+    p.add_argument("--check-news", action="store_true",
+                   help="fetch ForexFactory calendar + FXStreet headlines and exit "
+                        "(verifies news feeds work on this machine; no MT5 needed)")
     return p.parse_args()
+
+
+def check_news() -> None:
+    from baba_bot.news import NewsCalendar
+    from baba_bot.newsfeed import fetch_fxstreet_headlines
+
+    cal = NewsCalendar()
+    print(cal.refresh_auto(force=True))
+    for ev in cal.auto_events[:12]:
+        print(f"  {ev['time']} UTC  [{ev['currencies'][0]}] {ev['name']} ({ev['impact']} window)")
+    if len(cal.auto_events) > 12:
+        print(f"  ... and {len(cal.auto_events) - 12} more")
+    print()
+    try:
+        for h in fetch_fxstreet_headlines(limit=10):
+            flag = "  !! RISK" if h["risk_flag"] else ""
+            print(f"  - {h['title']}{flag}")
+    except Exception as exc:
+        print(f"FXStreet headlines unavailable: {exc}")
 
 
 def main():
     args = parse_args()
+    if args.check_news:
+        check_news()
+        return
     if args.risk > 0.02:
         raise SystemExit("Blueprint hard cap: risk per trade must be <= 0.02 (2%)")
 

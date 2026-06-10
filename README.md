@@ -20,19 +20,46 @@ XAUUSD M15 — ENTER BUY (long)
 
 ## Setup (on the Windows PC running MT5)
 
-1. Install Python 3.10+ and your MT5 terminal; log into your account
-   (demo recommended until the journal proves the edge).
+1. Install Python 3.10+ (python.org → check "Add to PATH" during install)
+   and your MT5 terminal; log into your account (demo recommended until the
+   journal proves the edge).
 2. In MT5: Tools → Options → Expert Advisors → enable **Algo Trading**
    (required for the Python API to attach — the advisor still never trades).
-3. ```
+3. Get this repo onto the PC (`git clone ...` or download ZIP), then in a
+   terminal inside the repo folder:
+   ```
    pip install -r requirements.txt
+   ```
+4. Verify the news feeds work (no MT5 needed for this step):
+   ```
+   python main.py --check-news
+   ```
+   You should see this week's high-impact events (ForexFactory calendar) and
+   the latest FXStreet headlines.
+5. Run the smoke test once: `python tests/smoke_test.py` → `ALL CHECKS PASSED`.
+6. Start advising:
+   ```
    python main.py --symbols XAUUSD EURUSD --timeframes M15 H1 --risk 0.01
    ```
-4. Optional: maintain `news_events.json` with upcoming high-impact events
-   (see `news_events.example.json`) so the advisor enforces blackout windows.
 
 Symbols must match your broker's Market Watch names exactly (some brokers use
-`XAUUSD.a`, `GOLD`, etc.).
+`XAUUSD.a`, `GOLD`, etc. — check Market Watch right-click → Symbols).
+
+## News integration
+
+- **ForexFactory calendar** (official JSON feed): fetched on startup and
+  every 4 hours, cached in `news_events_auto.json`. High-impact events become
+  automatic blackout windows (FOMC 60/60 min, NFP & CPI 30/30, ECB/BOJ 15/30,
+  other high-impact 30/30) per affected currency — gold is gated by all USD
+  events. The forexfactory.com website itself is Cloudflare-protected, so the
+  sanctioned data feed is used instead of scraping.
+- **FXStreet headlines** (RSS): shown on startup and hourly. Headlines are
+  situational awareness, not signals; titles containing unscheduled-risk
+  keywords (intervention, emergency, escalation, surprise hike...) print a
+  `!! RISK` flag and a stand-aside warning, since unscheduled events cannot
+  be gated in advance.
+- `news_events.json` (manual, optional) is still honored and merged — useful
+  for events the feed misses or your own no-trade windows.
 
 ## What it does every new closed bar
 

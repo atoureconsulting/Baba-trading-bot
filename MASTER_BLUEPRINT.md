@@ -17,7 +17,8 @@
 |---|---|---|
 | Price/OHLCV multi-TF (15M, 1H, 4H, D) with **bid AND ask** | **OANDA v20 API via `tpqoa`** (candidate promoted by KB#2 — free practice account, historical mid/bid/ask candles, tick streaming, order API, has XAU/USD) | ⏳ awaiting confirmation |
 | Tick volume | Same feed (caveat: forex tick volume ≠ real volume; confirmation-only) | ⏳ |
-| Macro calendar (NFP, FOMC, CPI, ECB/BOJ) | ForexFactory / DailyFX calendar (scrape or JSON) | ⏳ candidate chosen |
+| Macro calendar (NFP, FOMC, CPI, ECB/BOJ) | **ForexFactory official JSON feed** — implemented (`baba_bot/newsfeed.py`), auto-refreshed 4h, feeds blackout gate | ✅ implemented |
+| Headline awareness / unscheduled risk | **FXStreet RSS** — implemented; hourly display + risk-keyword flagging (display layer, not a signal) | ✅ implemented |
 | Retail positioning | IG Client Sentiment or OANDA Order Book | ⏳ candidate chosen |
 | COT report (weekly) | CFTC (free, published Fridays, data as of Tuesday) | ⏳ |
 | Gold macro drivers | DXY price feed, 10Y TIPS real yield (FRED), CME FedWatch | ⏳ |
@@ -409,3 +410,4 @@ Bollinger mean reversion, momentum (sign of rolling mean return), contrarian
 | 8 | 2026-06-10 | raidastauras/Trading-Bot ML research | §13 KB#8; 3-class labeling + session dummies + negative-evidence (§2,§6,§11) | Reinforces ML-as-meta-layer-only rule (clash #5) |
 | 9 | 2026-06-10 | Trading_Pal-main (United-Visions) | §13 KB#9; Polygon backup-feed idea (§1) | AGPL license wall — ideas only, no code (clash #7) |
 | 10 | 2026-06-10 | User requirement: run alongside MT5 as per-timeframe enter/exit advisor; improve accuracy | Platform locked (header, §12); advisor mode + signal journal (§12); accuracy roadmap (§12b); initial Python implementation in `baba_bot/` | Resolves clash #8 (MQL5-vs-Python) in favor of MT5-side Python; OANDA demoted to backtest-data fallback |
+| 11 | 2026-06-10 | User requirement: live news from fxstreet.com/news + forexfactory.com | `baba_bot/newsfeed.py`: ForexFactory official calendar feed → automatic blackout gate; FXStreet RSS → hourly headlines + unscheduled-risk keyword flags; `--check-news` verifier | forexfactory.com HTML is Cloudflare-protected → used their sanctioned JSON feed instead of scraping; headlines kept as display/warning layer, NOT a signal input (consistent with §4 "avoid news, don't predict it") |

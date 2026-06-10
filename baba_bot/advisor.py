@@ -29,10 +29,13 @@ class Advisor:
         self.breaker = CircuitBreaker()
         self._last_bar: dict[tuple[str, str], pd.Timestamp] = {}
         self._last_day: datetime | None = None
+        self._last_headlines: datetime | None = None
 
     def run(self) -> None:
         print(f"Baba advisor watching {self.symbols} on {self.timeframes} "
               f"(risk {self.risk_pct:.1%}/signal). Ctrl-C to stop.")
+        print("[news] " + self.news.refresh_auto(force=True))
+        self.show_headlines()
         while True:
             try:
                 self.tick()
@@ -43,8 +46,31 @@ class Advisor:
                 print(f"[warn] {exc}")
             time.sleep(POLL_SECONDS)
 
+    def show_headlines(self) -> None:
+        """Print latest FXStreet headlines; flag unscheduled-risk keywords."""
+        try:
+            from .newsfeed import fetch_fxstreet_headlines
+            headlines = fetch_fxstreet_headlines(limit=8)
+        except Exception as exc:
+            print(f"[news] FXStreet headlines unavailable: {exc}")
+            return
+        print("[news] FXStreet latest:")
+        for h in headlines:
+            flag = "  !! RISK" if h["risk_flag"] else ""
+            print(f"   - {h['title']}{flag}")
+        if any(h["risk_flag"] for h in headlines):
+            print("[news] risk keywords detected in headlines — consider widening "
+                  "stops or standing aside (unscheduled events can't be gated).")
+
     def tick(self) -> None:
         now = datetime.now(timezone.utc)
+        # refresh the ForexFactory calendar when stale; headlines hourly
+        msg = self.news.refresh_auto()
+        if "updated" in msg:
+            print("[news] " + msg)
+        if self._last_headlines is None or (now - self._last_headlines).seconds >= 3600:
+            self.show_headlines()
+            self._last_headlines = now
         balance, equity, _ = self.client.account()
         halt = self.breaker.update(equity, new_day=self._last_day != now.date())
         self._last_day = now.date()
