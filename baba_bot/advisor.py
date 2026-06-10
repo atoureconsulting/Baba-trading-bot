@@ -36,6 +36,7 @@ class Advisor:
               f"(risk {self.risk_pct:.1%}/signal). Ctrl-C to stop.")
         print("[news] " + self.news.refresh_auto(force=True))
         self.show_headlines()
+        self._last_headlines = datetime.now(timezone.utc)
         while True:
             try:
                 self.tick()
