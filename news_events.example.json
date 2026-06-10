@@ -1,0 +1,6 @@
+[
+  {"time": "2026-06-12 12:30", "name": "US CPI (May)", "impact": "CPI", "currencies": ["USD"]},
+  {"time": "2026-06-17 18:00", "name": "FOMC rate decision", "impact": "FOMC", "currencies": ["USD"]},
+  {"time": "2026-07-02 12:30", "name": "Non-Farm Payrolls", "impact": "NFP", "currencies": ["USD"]},
+  {"time": "2026-06-18 11:45", "name": "ECB rate decision", "impact": "ECB", "currencies": ["EUR"]}
+]

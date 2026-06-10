@@ -1,6 +1,7 @@
 # Baba Trading Bot — Master Blueprint
 
-**Version:** 1.2
+**Version:** 1.3
+**Platform (LOCKED by user decision):** MetaTrader 5 terminal + Python `MetaTrader5` package, running as a **signal advisor** alongside the user's own MT5 — human executes, bot analyzes and alerts (enter/exit/stand-aside per symbol & timeframe).
 **Scope:** Hybrid trading signal bot for Forex majors (EUR/USD, GBP/USD, USD/JPY, USD/CHF, AUD/USD, USD/CAD, NZD/USD) and Gold (XAU/USD)
 **Goal:** Maximize signal accuracy by fusing technical analysis, market sentiment, macroeconomic filters, and validated open-source bot logic.
 
@@ -242,16 +243,40 @@ break-even standalone in published tests, so the edge thesis rests entirely on
 the filters. Expect live results at the low end of the range; treat anything
 above 60% in backtest as an overfitting red flag, not a success.
 
-## 12. Missing Piece (highest-value next input)
+## 12. Operating Mode (decided)
 
-**Lock the platform decision: OANDA (Python) vs MT5.** Seven of nine KB sources
-now cluster around two stacks — OANDA REST/stream in Python (KB#2, #4, #8, #9)
-vs MetaTrader 5 (KB#3 bridge, #5, #6, #7). Everything in this blueprint is
-implementable on either, but the choice determines what we port vs use natively, and
-nothing can be backtested against real spreads until it's made. Recommendation:
-**OANDA practice account + Python** (free API, bid/ask history, practice
-sandbox, all reference patterns already analyzed). Second priority: confirm
-retail sentiment source (IG vs OANDA order book) for the veto layer.
+**MT5 signal-advisor mode.** ~~Platform decision~~ → resolved: MetaTrader 5.
+- Python process attaches to the user's running MT5 terminal (`MetaTrader5` pip
+  package, Windows) — reads candles for configured symbols/timeframes, account
+  balance/currency, live spread, symbol contract specs.
+- Per closed bar it runs the §10 decision tree and emits **advice**, not orders:
+  `ENTER long/short @ price, SL, TP, lots, confidence, reasons` or
+  `EXIT/manage` for previously advised trades, or stays silent.
+- Every emitted signal is journaled (`signals_journal.json`) with its later
+  outcome → this journal is the calibration dataset for §11.
+- EarnForex tools (KB#5, KB#6) can run natively on the same charts as visual
+  cross-checks since we're MT5-side anyway.
+- Upgrade path: same signal engine can later auto-execute via `mt5.order_send()`
+  once trust is earned (flip `execution_mode: advise → auto`).
+
+## 12b. Accuracy Improvement Roadmap (path from prior to measured edge)
+
+The 52–58% prior improves through measurement and selectivity, in this order:
+1. **Backtest on real MT5 history** (your broker's actual spreads on XAU/USD!)
+   under the §9 protocol → replaces the prior with measured per-pair, per-TF
+   win rates. This is the single biggest accuracy lever and is now unblocked.
+2. **Confidence-threshold tuning:** the composite score is a dial — raising the
+   threshold trades frequency for accuracy. Target: emit only top-confluence
+   signals (≈2–5/day across pairs), measured precision > raw win rate.
+3. **Filter stack verification:** session gate, news blackout, MTF alignment,
+   Market Profile level proximity — each gets an ablation test (accuracy with
+   vs without) so weights reflect *our* data, not priors.
+4. **Journal-driven recalibration:** monthly walk-forward refit of indicator
+   weights + threshold from the live signal journal; drop any component whose
+   ablation shows no contribution.
+5. **Meta-model (later):** logistic regression over the engineered filter
+   features (NOT raw OHLCV — KB#8 lesson) to learn interaction effects, with
+   the 3-class dead-zone labeling from KB#8.
 
 ---
 
@@ -383,3 +408,4 @@ Bollinger mean reversion, momentum (sign of rolling mean return), contrarian
 | 7 | 2026-06-10 | geraked/metatrader5 EA collection | §13 KB#7; EAUtils risk patterns + COT1 momentum approach (§5,§7) | Grid-dependent profits rejected (clash #1); COT philosophy conflict logged (clash #6) |
 | 8 | 2026-06-10 | raidastauras/Trading-Bot ML research | §13 KB#8; 3-class labeling + session dummies + negative-evidence (§2,§6,§11) | Reinforces ML-as-meta-layer-only rule (clash #5) |
 | 9 | 2026-06-10 | Trading_Pal-main (United-Visions) | §13 KB#9; Polygon backup-feed idea (§1) | AGPL license wall — ideas only, no code (clash #7) |
+| 10 | 2026-06-10 | User requirement: run alongside MT5 as per-timeframe enter/exit advisor; improve accuracy | Platform locked (header, §12); advisor mode + signal journal (§12); accuracy roadmap (§12b); initial Python implementation in `baba_bot/` | Resolves clash #8 (MQL5-vs-Python) in favor of MT5-side Python; OANDA demoted to backtest-data fallback |
