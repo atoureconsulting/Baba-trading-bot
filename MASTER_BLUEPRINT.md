@@ -235,14 +235,18 @@ continuous_monitor():
 
 ## 11. Accuracy Estimate
 
-**Directional win-rate prior: 52–58%** at blended ~1.6 R average payoff (profit
-factor ≈ 1.4–1.8) — *unvalidated, pre-backtest*. Reasoning: each filter layer
-(regime gating, MTF alignment, news blackout, session gating, sentiment veto)
-independently removes documented false-signal classes rather than adding
-predictive claims; the trigger set itself (EMA cross, BB fade) is roughly
-break-even standalone in published tests, so the edge thesis rests entirely on
-the filters. Expect live results at the low end of the range; treat anything
-above 60% in backtest as an overfitting red flag, not a success.
+**MEASURED (first walk-forward backtest, Admirals MT5 data 2022–2026, M15,
+out-of-sample):** GOLD −0.03R/trade (192 trades), GBPUSD +0.03R (149),
+USDJPY +0.14R (135), EURUSD −0.10R (111). Win rates 32–40% at ~2R targets —
+i.e. **no proven edge yet as configured**, replacing the old 52–58% prior.
+Two leads from the regime breakdown: HIGH_VOL breakout trades were positive
+on every pair that produced them (GOLD +0.55R/64.7% win on 17; EURUSD +0.16R
+on 23; GBPUSD +0.14R on 17 — small samples, promising not proven), while the
+TRENDING EMA-cross trigger was ≈0R or worse across ~1,100 trades, confirming
+KB#4's MA-crossover evidence. Engine integrity was verified separately on
+random synthetic data (reports ≈0/negative — does not invent edge).
+The confidence score showed weak discrimination (walk-forward picked the
+lowest threshold on 3 of 4 pairs) — scoring features need enrichment.
 
 ## 12. Operating Mode (decided)
 
@@ -412,3 +416,4 @@ Bollinger mean reversion, momentum (sign of rolling mean return), contrarian
 | 10 | 2026-06-10 | User requirement: run alongside MT5 as per-timeframe enter/exit advisor; improve accuracy | Platform locked (header, §12); advisor mode + signal journal (§12); accuracy roadmap (§12b); initial Python implementation in `baba_bot/` | Resolves clash #8 (MQL5-vs-Python) in favor of MT5-side Python; OANDA demoted to backtest-data fallback |
 | 11 | 2026-06-10 | User requirement: live news from fxstreet.com/news + forexfactory.com | `baba_bot/newsfeed.py`: ForexFactory official calendar feed → automatic blackout gate; FXStreet RSS → hourly headlines + unscheduled-risk keyword flags; `--check-news` verifier | forexfactory.com HTML is Cloudflare-protected → used their sanctioned JSON feed instead of scraping; headlines kept as display/warning layer, NOT a signal input (consistent with §4 "avoid news, don't predict it") |
 | 12 | 2026-06-10 | User: build backtester to improve accuracy; focus pairs XAU/USD, GBP/USD, USD/JPY, EUR/USD | `baba_bot/backtest.py` + `backtest.py` CLI: replays the LIVE engine over MT5 history, sequential single-position, spread-as-R-cost, SL-first on ambiguous bars, per-regime breakdown, **walk-forward confidence-threshold optimization** (train 12m/test 3m rolling, §9-compliant); inside-bar strategy backtested separately; focus pairs are now the advisor defaults | News gate OFF in backtest (no historical calendar) — noted in every report; verified the engine reports ~zero/negative expectancy on synthetic random data (does not manufacture edge from noise) |
+| 13 | 2026-06-10 | **First real backtest results** (user-run, Admirals demo, ~4y M15 × 4 pairs) | §11 rewritten with measured numbers; EURUSD M15 signals deprecated (negative OOS); inside-bar advice disabled by default (H4-granularity simulation artifact — same-bar entry/SL ambiguity; needs M15-level retest); TRENDING EMA-cross trigger formally demoted per clash #4 ("on notice" condition met) — replacement with structure/pullback entries is the top development priority; HIGH_VOL breakout regime promoted to lead candidate (positive OOS on all pairs that fired, small n) | Resolves clash #4 against the EMA cross; KB#4's negative MA-cross evidence reproduced on our own data |

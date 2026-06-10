@@ -18,12 +18,16 @@ POLL_SECONDS = 10
 
 class Advisor:
     def __init__(self, client, symbols: list[str], timeframes: list[str],
-                 risk_pct: float = 0.01, spread_limits: dict[str, int] | None = None):
+                 risk_pct: float = 0.01, spread_limits: dict[str, int] | None = None,
+                 enable_inside_bar: bool = False):
         self.client = client
         self.symbols = symbols
         self.timeframes = timeframes
         self.risk_pct = risk_pct
         self.spread_limits = spread_limits or {}
+        # OFF by default: H4-granularity backtest is unreliable for this
+        # pending-order strategy (KB#13) — re-enable after M15-level retest.
+        self.enable_inside_bar = enable_inside_bar
         self.news = NewsCalendar()
         self.journal = SignalJournal()
         self.breaker = CircuitBreaker()
@@ -85,7 +89,8 @@ class Advisor:
             blackout = self.news.in_blackout(symbol, now)
 
             # 4H inside-bar pending-order advice (once per new 4H bar)
-            if self._is_new_bar(symbol, "H4", df_4h.index[-1]) and not blackout:
+            if self.enable_inside_bar and self._is_new_bar(symbol, "H4", df_4h.index[-1]) \
+                    and not blackout:
                 ib = inside_bar_signal(symbol, df_4h, spec, balance, self.risk_pct)
                 if ib:
                     print("\n" + ib.describe() + "\n")

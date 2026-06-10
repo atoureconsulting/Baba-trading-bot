@@ -27,6 +27,9 @@ def parse_args():
     p.add_argument("--check-news", action="store_true",
                    help="fetch ForexFactory calendar + FXStreet headlines and exit "
                         "(verifies news feeds work on this machine; no MT5 needed)")
+    p.add_argument("--inside-bar", action="store_true",
+                   help="re-enable 4H inside-bar advice (off by default pending "
+                        "M15-granularity retest — see blueprint KB#13)")
     return p.parse_args()
 
 
@@ -62,7 +65,8 @@ def main():
 
     client = MT5Client()
     try:
-        Advisor(client, args.symbols, args.timeframes, args.risk).run()
+        Advisor(client, args.symbols, args.timeframes, args.risk,
+                enable_inside_bar=args.inside_bar).run()
     finally:
         client.shutdown()
 
